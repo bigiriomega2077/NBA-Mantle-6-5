@@ -12,7 +12,7 @@ def get_top_5(target_name):
     return []
 
 # Load cleaned players
-with open("players_cleaned.json", encoding="utf-8") as f:
+with open("backend/players_cleaned.json", encoding="utf-8") as f:
     players_data = json.load(f)
 
 # Filter: modern players only (post-2010, 6+ seasons)

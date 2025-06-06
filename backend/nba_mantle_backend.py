@@ -1,8 +1,10 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from difflib import get_close_matches
 import json
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 with open('players_cleaned.json', encoding='utf-8') as f:
     players_db = json.load(f)
@@ -188,7 +190,13 @@ def guess():
         "breakdown": breakdown
     })
 
-if __name__ == '__main__':
-    app.config["CURRENT_TARGET"] = ""
-    app.run(debug=True)
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'Server is running'})
 
+if __name__ == '__main__':
+    print("Starting NBA Similarity Game Backend...")
+    print("Server will run on http://127.0.0.1:5000")
+    print("Make sure your frontend connects to this URL")
+    app.config["CURRENT_TARGET"] = ""
+    app.run(host='127.0.0.1', port=5000, debug=True)
