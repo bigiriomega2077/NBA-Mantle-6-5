@@ -10,11 +10,15 @@ const NBAGuessGame = () => {
   const [error, setError] = useState('');
   const [top5Players, setTop5Players] = useState([]);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [allPlayers, setAllPlayers] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
 
-  // Sample modern NBA players for random selection
+  // Fallback modern NBA players (only used if JSON loading fails)
   const modernPlayers = [
     'LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo',
-    'Luka Doncic', 'Jayson Tatum', 'Joel Embiid', 'Nikola Jokic', 'Damian Lillard',
+    'Luka Dončić', 'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić', 'Damian Lillard',
     'Jimmy Butler', 'Kawhi Leonard', 'Anthony Davis', 'Russell Westbrook',
     'James Harden', 'Chris Paul', 'Klay Thompson', 'Draymond Green',
     'Paul George', 'Kyrie Irving', 'Bradley Beal', 'Devin Booker',
@@ -23,7 +27,10 @@ const NBAGuessGame = () => {
   ];
 
   const startNewGame = () => {
-    const randomPlayer = modernPlayers[Math.floor(Math.random() * modernPlayers.length)];
+    // Use allPlayers if available, otherwise fall back to modernPlayers
+    const playersToUse = allPlayers.length > 0 ? allPlayers : modernPlayers;
+    const randomPlayer = playersToUse[Math.floor(Math.random() * playersToUse.length)];
+    
     setTargetPlayer(randomPlayer);
     setGuess('');
     setGuessHistory([]);
@@ -32,14 +39,62 @@ const NBAGuessGame = () => {
     setError('');
     setTop5Players([]);
     setShowAnswer(false);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSelectedSuggestionIndex(-1);
+    
+    // Immediately start a new game with the random player
+    console.log('New game started with:', randomPlayer);
   };
 
   useEffect(() => {
-    startNewGame();
+    const loadPlayerNames = async () => {
+      try {
+        const response = await fetch('/players_cleaned.json');
+        
+        // Ensure proper text decoding
+        const text = await response.text();
+        const data = JSON.parse(text);
+        
+        const playerNames = Object.keys(data).sort();
+        setAllPlayers(playerNames);
+
+        // Once players are loaded, start the game with a random one
+        const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+        setTargetPlayer(randomPlayer);
+      } catch (error) {
+        console.error('Could not load players_cleaned.json', error);
+        // fallback to modern players
+        const fallback = modernPlayers;
+        setAllPlayers(fallback);
+
+        const randomPlayer = fallback[Math.floor(Math.random() * fallback.length)];
+        setTargetPlayer(randomPlayer);
+      }
+
+      // Reset game state
+      setGuess('');
+      setGuessHistory([]);
+      setGameWon(false);
+      setGuessCount(0);
+      setError('');
+      setTop5Players([]);
+      setShowAnswer(false);
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setSelectedSuggestionIndex(-1);
+    };
+
+    loadPlayerNames();
   }, []);
 
   const makeGuess = async () => {
     if (!guess.trim()) return;
+    
+    // Hide suggestions when making a guess
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setSelectedSuggestionIndex(-1);
     
     setLoading(true);
     setError('');
@@ -48,7 +103,7 @@ const NBAGuessGame = () => {
       const response = await fetch('http://127.0.0.1:5000/guess', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json; charset=utf-8',
         },
         body: JSON.stringify({
           guess: guess.trim(),
@@ -66,16 +121,23 @@ const NBAGuessGame = () => {
           breakdown: breakdown || {}
         };
 
-        setGuessHistory(prev => {
-          const updated = [...prev, newGuess];
-          return updated.sort((a, b) => b.score - a.score).slice(0, 15);
-        });
+        // Check if this exact player (by matched_name) has already been guessed
+        const alreadyGuessed = guessHistory.some(g => g.name === newGuess.name);
+        
+        if (!alreadyGuessed) {
+          setGuessHistory(prev => {
+            const updated = [...prev, newGuess];
+            return updated.sort((a, b) => b.score - a.score).slice(0, 15);
+          });
 
-        setGuessCount(prev => prev + 1);
+          setGuessCount(prev => prev + 1);
 
-        if (score === 100) {
-          setGameWon(true);
-          setTop5Players(top_5 || []);
+          if (score === 100) {
+            setGameWon(true);
+            setTop5Players(top_5 || []);
+          }
+        } else {
+          setError('You have already guessed this player!');
         }
 
         setGuess('');
@@ -98,7 +160,7 @@ const NBAGuessGame = () => {
       const response = await fetch('http://127.0.0.1:5000/guess', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json; charset=utf-8',
         },
         body: JSON.stringify({
           guess: targetPlayer,
@@ -118,6 +180,13 @@ const NBAGuessGame = () => {
     setLoading(false);
   };
 
+  const handleSuggestionSelect = (selectedName) => {
+    setGuess(selectedName);
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSelectedSuggestionIndex(-1);
+  };
+
   const getScoreColor = (score) => {
     if (score >= 80) return '#10b981'; // green
     if (score >= 60) return '#f59e0b'; // yellow
@@ -125,11 +194,59 @@ const NBAGuessGame = () => {
     return '#ef4444'; // red
   };
 
-  const getScoreBg = (score) => {
-    if (score >= 80) return 'rgba(16, 185, 129, 0.2)';
-    if (score >= 60) return 'rgba(245, 158, 11, 0.2)';
-    if (score >= 40) return 'rgba(249, 115, 22, 0.2)';
-    return 'rgba(239, 68, 68, 0.2)';
+  const ScoreBar = ({ score, showLabel = true }) => {
+    const percentage = Math.max(0, Math.min(100, score));
+    const color = getScoreColor(score);
+    
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.75rem',
+        width: '100%'
+      }}>
+        <div style={{
+          flex: 1,
+          height: '1.5rem',
+          background: 'rgba(255, 255, 255, 0.1)',
+          borderRadius: '0.75rem',
+          overflow: 'hidden',
+          position: 'relative'
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${percentage}%`,
+            background: `linear-gradient(90deg, ${color}dd, ${color})`,
+            borderRadius: '0.75rem',
+            transition: 'width 0.8s ease-out',
+            boxShadow: `0 0 10px ${color}40`
+          }} />
+          {showLabel && (
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '0.75rem',
+              transform: 'translateY(-50%)',
+              fontSize: '0.75rem',
+              fontWeight: 'bold',
+              color: percentage > 30 ? 'white' : color,
+              textShadow: percentage > 30 ? '0 1px 2px rgba(0,0,0,0.8)' : 'none'
+            }}>
+              {score}
+            </div>
+          )}
+        </div>
+        <div style={{
+          fontSize: '0.9rem',
+          fontWeight: 'bold',
+          color: color,
+          minWidth: '3rem',
+          textAlign: 'right'
+        }}>
+          {score}/100
+        </div>
+      </div>
+    );
   };
 
   const formatBreakdownKey = (key) => {
@@ -239,12 +356,67 @@ const NBAGuessGame = () => {
               </h3>
               
               {!gameWon && !showAnswer && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
                   <input
                     type="text"
                     value={guess}
-                    onChange={(e) => setGuess(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && makeGuess()}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setGuess(value);
+                      setSelectedSuggestionIndex(-1); // Reset selection when typing
+                      
+                      if (value.length > 0) {
+                        const filtered = allPlayers.filter(name =>
+                          name.toLowerCase().includes(value.toLowerCase()) &&
+                          !name.includes('?') // Filter out names with question marks
+                        ).slice(0, 8);
+                        setSuggestions(filtered);
+                        setShowSuggestions(true);
+                      } else {
+                        setSuggestions([]);
+                        setShowSuggestions(false);
+                      }
+                      
+                      // Clear any previous error when user starts typing
+                      if (error) setError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (showSuggestions && suggestions.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setSelectedSuggestionIndex(prev => 
+                            prev < suggestions.length - 1 ? prev + 1 : 0
+                          );
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setSelectedSuggestionIndex(prev => 
+                            prev > 0 ? prev - 1 : suggestions.length - 1
+                          );
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (selectedSuggestionIndex >= 0) {
+                            handleSuggestionSelect(suggestions[selectedSuggestionIndex]);
+                          } else {
+                            makeGuess();
+                          }
+                        } else if (e.key === 'Escape') {
+                          setShowSuggestions(false);
+                          setSuggestions([]);
+                          setSelectedSuggestionIndex(-1);
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        makeGuess();
+                      }
+                    }}
+                    onBlur={() => {
+                      // Delay hiding suggestions to allow for clicks
+                      setTimeout(() => {
+                        setShowSuggestions(false);
+                        setSuggestions([]);
+                        setSelectedSuggestionIndex(-1);
+                      }, 150);
+                    }}
                     placeholder="Enter NBA player name..."
                     style={{
                       width: '100%',
@@ -259,7 +431,47 @@ const NBAGuessGame = () => {
                     }}
                     disabled={loading}
                   />
-                  
+                  {showSuggestions && suggestions.length > 0 && (
+                    <ul style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      marginTop: '0.25rem',
+                      background: 'white',
+                      borderRadius: '0.5rem',
+                      padding: '0.5rem 0',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                      color: 'black',
+                      maxHeight: '200px',
+                      overflowY: 'auto',
+                      zIndex: 1000,
+                      listStyle: 'none',
+                      margin: 0,
+                      fontFamily: 'system-ui, -apple-system, "Segoe UI", Arial, sans-serif'
+                    }}>
+                      {suggestions.map((suggestion, index) => (
+                        <li
+                          key={index}
+                          onMouseDown={(e) => {
+                            e.preventDefault(); // Prevent blur from firing
+                            handleSuggestionSelect(suggestion);
+                          }}
+                          onMouseEnter={() => setSelectedSuggestionIndex(index)}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            backgroundColor: index === selectedSuggestionIndex ? '#f0f0f0' : 'white',
+                            cursor: 'pointer',
+                            borderRadius: index === selectedSuggestionIndex ? '0.25rem' : '0',
+                            margin: index === selectedSuggestionIndex ? '0 0.25rem' : '0',
+                            fontSize: '1rem',
+                            fontWeight: '400'
+                          }}
+                          dangerouslySetInnerHTML={{ __html: suggestion }}
+                        />
+                      ))}
+                    </ul>
+                  )}
                   <button
                     onClick={makeGuess}
                     disabled={loading || !guess.trim()}
@@ -281,6 +493,7 @@ const NBAGuessGame = () => {
                     {loading ? 'Searching...' : 'Submit Guess'}
                   </button>
                 </div>
+
               )}
 
               {error && (
@@ -378,17 +591,19 @@ const NBAGuessGame = () => {
                 }}>
                   📈 Top 5 Most Similar
                 </h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   {top5Players.map(([name, score], index) => (
                     <div key={name} style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.75rem',
+                      padding: '1rem',
                       background: 'rgba(255, 255, 255, 0.05)',
-                      borderRadius: '0.5rem'
+                      borderRadius: '0.75rem'
                     }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        marginBottom: '0.75rem'
+                      }}>
                         <span style={{
                           width: '1.5rem',
                           height: '1.5rem',
@@ -403,14 +618,9 @@ const NBAGuessGame = () => {
                         }}>
                           {index + 1}
                         </span>
-                        <span style={{ fontWeight: '500' }}>{name}</span>
+                        <span style={{ fontWeight: '500', flex: 1 }}>{name}</span>
                       </div>
-                      <span style={{ 
-                        fontWeight: 'bold', 
-                        color: getScoreColor(score)
-                      }}>
-                        {score}/100
-                      </span>
+                      <ScoreBar score={score} />
                     </div>
                   ))}
                 </div>
@@ -465,26 +675,20 @@ const NBAGuessGame = () => {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      marginBottom: '0.75rem'
+                      marginBottom: '1rem'
                     }}>
                       <h4 style={{ 
                         fontSize: '1.1rem', 
                         fontWeight: '600',
-                        margin: 0
+                        margin: 0,
+                        flex: 1
                       }}>
                         {item.name}
                       </h4>
-                      <div style={{
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '1rem',
-                        fontSize: '0.9rem',
-                        fontWeight: 'bold',
-                        background: getScoreBg(item.score),
-                        color: getScoreColor(item.score),
-                        border: `1px solid ${getScoreColor(item.score)}40`
-                      }}>
-                        {item.score}/100
-                      </div>
+                    </div>
+                    
+                    <div style={{ marginBottom: '1rem' }}>
+                      <ScoreBar score={item.score} />
                     </div>
                     
                     {item.breakdown && Object.keys(item.breakdown).length > 0 && (
