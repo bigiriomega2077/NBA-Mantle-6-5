@@ -1,16 +1,22 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from difflib import get_close_matches
 import json
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='build', static_url_path='')
 CORS(app)  # Enable CORS for all routes
 
 # Load players database
-with open('players_cleaned.json', encoding='utf-8') as f:
-    players_db = json.load(f)
+def load_players_db():
+    try:
+        with open('players_cleaned.json', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("Warning: players_cleaned.json not found. Using empty database.")
+        return {}
 
+players_db = load_players_db()
 guess_counter = {}
 
 def compute_similarity(player1, player2, name1=None, name2=None):
@@ -155,17 +161,26 @@ def get_player(name):
         return players_db[close[0]], close[0]
     return None, None
 
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        'message': 'NBA Similarity Game API',
-        'endpoints': {
-            '/health': 'Health check',
-            '/guess': 'Submit a guess (POST)'
-        }
-    })
+# Serve React App
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(app.static_folder + '/' + path):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
-@app.route('/guess', methods=['POST'])
+# API Routes
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'Server is running', 'players_loaded': len(players_db)})
+
+@app.route('/api/players', methods=['GET'])
+def get_players():
+    """Return list of all player names"""
+    return jsonify(list(players_db.keys()))
+
+@app.route('/api/guess', methods=['POST'])
 def guess():
     data = request.json
     guess_input = data['guess']
@@ -191,6 +206,7 @@ def guess():
         return jsonify({
             "score": 100,
             "message": "🔥 You got it!",
+            "matched_name": guess_key,
             "top_5": top_5
         })
 
@@ -201,10 +217,6 @@ def guess():
         "matched_name": guess_key,
         "breakdown": breakdown
     })
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({'status': 'Server is running'})
 
 if __name__ == '__main__':
     print("Starting NBA Similarity Game Backend...")

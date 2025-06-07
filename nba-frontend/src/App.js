@@ -15,7 +15,7 @@ const NBAGuessGame = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
 
-  // Fallback modern NBA players (only used if JSON loading fails)
+  // Fallback modern NBA players (only used if API loading fails)
   const modernPlayers = [
     'LeBron James', 'Stephen Curry', 'Kevin Durant', 'Giannis Antetokounmpo',
     'Luka Dončić', 'Jayson Tatum', 'Joel Embiid', 'Nikola Jokić', 'Damian Lillard',
@@ -25,6 +25,13 @@ const NBAGuessGame = () => {
     'Donovan Mitchell', 'Ja Morant', 'Trae Young', 'Zion Williamson',
     'Pascal Siakam', 'Bam Adebayo', 'Jaylen Brown', 'Tyler Herro'
   ];
+
+  // Get the base API URL - in production it will be the same domain
+  const getApiUrl = (endpoint) => {
+    const isDevelopment = window.location.hostname === 'localhost';
+    const baseUrl = isDevelopment ? 'http://127.0.0.1:5000' : '';
+    return `${baseUrl}/api${endpoint}`;
+  };
 
   const startNewGame = () => {
     // Use allPlayers if available, otherwise fall back to modernPlayers
@@ -50,20 +57,21 @@ const NBAGuessGame = () => {
   useEffect(() => {
     const loadPlayerNames = async () => {
       try {
-        const response = await fetch('/players_cleaned.json');
+        // Try to load from the API first
+        const response = await fetch(getApiUrl('/players'));
         
-        // Ensure proper text decoding
-        const text = await response.text();
-        const data = JSON.parse(text);
-        
-        const playerNames = Object.keys(data).sort();
-        setAllPlayers(playerNames);
-
-        // Once players are loaded, start the game with a random one
-        const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
-        setTargetPlayer(randomPlayer);
+        if (response.ok) {
+          const playerNames = await response.json();
+          setAllPlayers(playerNames.sort());
+          
+          // Once players are loaded, start the game with a random one
+          const randomPlayer = playerNames[Math.floor(Math.random() * playerNames.length)];
+          setTargetPlayer(randomPlayer);
+        } else {
+          throw new Error('Failed to load players from API');
+        }
       } catch (error) {
-        console.error('Could not load players_cleaned.json', error);
+        console.error('Could not load players from API, using fallback', error);
         // fallback to modern players
         const fallback = modernPlayers;
         setAllPlayers(fallback);
@@ -100,7 +108,7 @@ const NBAGuessGame = () => {
     setError('');
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/guess', {
+      const response = await fetch(getApiUrl('/guess'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -146,7 +154,7 @@ const NBAGuessGame = () => {
         setError(errorData.error || 'Unknown error occurred');
       }
     } catch (err) {
-      setError('Connection error. Make sure the Flask server is running on port 5000');
+      setError('Connection error. Please check your internet connection.');
     }
 
     setLoading(false);
@@ -157,7 +165,7 @@ const NBAGuessGame = () => {
     
     setLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:5000/guess', {
+      const response = await fetch(getApiUrl('/guess'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
