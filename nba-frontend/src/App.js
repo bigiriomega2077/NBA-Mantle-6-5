@@ -296,7 +296,7 @@ const NBAGuessGame = () => {
               WebkitTextFillColor: 'transparent',
               margin: 0
             }}>
-              NBA Similarity Game
+              NBA-MANTLE
             </h1>
             <span style={{ fontSize: '2rem' }}>🎯</span>
           </div>
