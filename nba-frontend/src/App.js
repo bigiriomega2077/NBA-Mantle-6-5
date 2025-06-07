@@ -730,6 +730,7 @@ const NBAGuessGame = () => {
         </div>
       </div>
     </div>
+    
   );
 };
 
