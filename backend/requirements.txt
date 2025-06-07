@@ -1,2 +1,7 @@
 certifi==2025.4.26
 wheel==0.45.1
+flask
+gunicorn
+flask-cors
+
+
