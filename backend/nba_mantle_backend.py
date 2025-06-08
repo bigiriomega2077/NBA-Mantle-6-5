@@ -108,8 +108,8 @@ def compute_similarity(player1, player2, name1=None, name2=None):
 
     # All-Star (once)
     if set(player1.get("all_star_seasons", [])) & set(player2.get("all_star_seasons", [])):
-        score += 2
-        breakdown["shared_all_star"] = 2
+        score += 3
+        breakdown["shared_all_star"] = 3
 
     # All-NBA/Defense/Rookie team (once)
     found_team = False
@@ -121,13 +121,13 @@ def compute_similarity(player1, player2, name1=None, name2=None):
         if found_team:
             break
     if found_team:
-        score += 2
-        breakdown["shared_all_team"] = 2
+        score += 3
+        breakdown["shared_all_team"] = 3
 
     # Shared award winners (once)
     if set(player1.get("awards_won", [])) & set(player2.get("awards_won", [])):
-        score += 1
-        breakdown["shared_awards"] = 1
+        score += 5
+        breakdown["shared_awards"] = 5
 
     breakdown["total"] = min(score, 99)
     return breakdown["total"], breakdown
