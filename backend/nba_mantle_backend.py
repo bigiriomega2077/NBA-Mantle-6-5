@@ -10,10 +10,10 @@ CORS(app)  # Enable CORS for all routes
 # Load players database
 def load_players_db():
     try:
-        with open('players_cleaned.json', encoding='utf-8') as f:
+        with open('players_awards.json', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print("Warning: players_cleaned.json not found. Using empty database.")
+        print("Warning: players_awards.json not found. Using empty database.")
         return {}
 
 players_db = load_players_db()
@@ -131,7 +131,7 @@ def compute_similarity(player1, player2, name1=None, name2=None):
 
     breakdown["total"] = min(score, 99)
     return breakdown["total"], breakdown
-    
+
 def get_player(name):
     name = name.strip().lower()
     for player in players_db:
