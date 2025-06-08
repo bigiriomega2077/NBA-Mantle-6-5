@@ -3,6 +3,7 @@ from flask_cors import CORS
 from difflib import get_close_matches
 import json
 import os
+import random
 
 app = Flask(__name__, static_folder='build', static_url_path='')
 CORS(app)  # Enable CORS for all routes
@@ -11,13 +12,45 @@ CORS(app)  # Enable CORS for all routes
 def load_players_db():
     try:
         with open('players_awards.json', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            # Convert to list format that frontend expects
+            players_list = []
+            for name, player_data in data.items():
+                # Calculate start year from seasons if not present
+                start_year = player_data.get('start_year', 0)
+                if start_year == 0 and player_data.get('seasons'):
+                    # Get the earliest season year
+                    seasons = player_data.get('seasons', [])
+                    if seasons:
+                        start_year = min(season.get('season', 9999) for season in seasons)
+                
+                player_entry = {
+                    'name': name,
+                    'start_year': start_year,
+                    'career_length': len(player_data.get('seasons', [])),
+                    'data': player_data
+                }
+                players_list.append(player_entry)
+            return data, players_list
     except FileNotFoundError:
         print("Warning: players_awards.json not found. Using empty database.")
-        return {}
+        return {}, []
 
-players_db = load_players_db()
+players_db, players_list = load_players_db()
 guess_counter = {}
+
+def get_filtered_players(game_mode='all-time'):
+    """Filter players based on game mode"""
+    if game_mode == 'classic':
+        # Filter for players who started in 2011+ with 5+ seasons
+        filtered = [
+            player for player in players_list 
+            if player['start_year'] >= 2011 and player['career_length'] >= 5
+        ]
+        return [player['name'] for player in filtered]
+    else:
+        # All time mode - return all players
+        return [player['name'] for player in players_list]
 
 def compute_similarity(player1, player2, name1=None, name2=None):
     score = 0
@@ -167,10 +200,43 @@ def serve(path):
 def health_check():
     return jsonify({'status': 'Server is running', 'players_loaded': len(players_db)})
 
-@app.route('/api/players', methods=['GET'])
+@app.route('/api/players', methods=['GET', 'POST'])
 def get_players():
-    """Return list of all player names"""
-    return jsonify(list(players_db.keys()))
+    """Return list of players based on game mode"""
+    if request.method == 'POST':
+        try:
+            data = request.json or {}
+            game_mode = data.get('mode', 'all-time')
+        except:
+            game_mode = 'all-time'
+    else:
+        game_mode = request.args.get('mode', 'all-time')
+    
+    # Return the structured data format that frontend expects
+    if game_mode == 'classic':
+        filtered_players = [
+            player for player in players_list 
+            if player['start_year'] >= 2011 and player['career_length'] >= 5
+        ]
+    else:
+        filtered_players = players_list
+    
+    return jsonify(filtered_players)
+
+@app.route('/api/player_names', methods=['GET', 'POST'])
+def get_player_names():
+    """Return list of player names based on game mode"""
+    if request.method == 'POST':
+        try:
+            data = request.json or {}
+            game_mode = data.get('mode', 'all-time')
+        except:
+            game_mode = 'all-time'
+    else:
+        game_mode = request.args.get('mode', 'all-time')
+    
+    filtered_names = get_filtered_players(game_mode)
+    return jsonify(filtered_names)
 
 @app.route('/api/player_awards', methods=['GET'])
 def get_player_awards():
@@ -179,43 +245,130 @@ def get_player_awards():
 
 @app.route('/api/guess', methods=['POST'])
 def guess():
-    data = request.json
-    guess_input = data['guess']
-    target_input = data['target']
+    try:
+        data = request.json or {}
+        guess_input = data.get('guess', '').strip()
+        target_input = data.get('target', '').strip()
+        game_mode = data.get('mode', 'all-time')  # Get game mode from request
 
-    guess_player, guess_key = get_player(guess_input)
-    target_player, target_key = get_player(target_input)
+        if not guess_input or not target_input:
+            return jsonify({"error": "Missing guess or target player."}), 400
 
-    if not guess_player or not target_player:
-        return jsonify({"error": "Invalid player name."}), 400
+        guess_player, guess_key = get_player(guess_input)
+        target_player, target_key = get_player(target_input)
 
-    guess_counter[target_key] = guess_counter.get(target_key, 0) + 1
+        if not guess_player or not target_player:
+            missing_player = "guess" if not guess_player else "target"
+            player_name = guess_input if not guess_player else target_input
+            return jsonify({"error": f"Invalid {missing_player} player name: '{player_name}'."}), 400
 
-    if guess_key == target_key:
-        similarities = []
-        for other_name, other_data in players_db.items():
-            if other_name == target_key:
-                continue
-            sim_score, _ = compute_similarity(other_data, target_player, other_name, target_key)
-            similarities.append((other_name, sim_score))
-        top_5 = sorted(similarities, key=lambda x: x[1], reverse=True)[:5]
+        # Validate that both players are allowed in the current game mode
+        allowed_players = get_filtered_players(game_mode)
+        if guess_key not in allowed_players:
+            return jsonify({"error": f"Player '{guess_key}' is not available in {game_mode} mode."}), 400
+        if target_key not in allowed_players:
+            return jsonify({"error": f"Target player '{target_key}' is not available in {game_mode} mode."}), 400
+
+        guess_counter[target_key] = guess_counter.get(target_key, 0) + 1
+
+        if guess_key == target_key:
+            # Calculate top 5 similar players from the same game mode
+            similarities = []
+            for other_name in allowed_players:
+                if other_name == target_key:
+                    continue
+                other_data = players_db.get(other_name)
+                if other_data:
+                    sim_score, _ = compute_similarity(other_data, target_player, other_name, target_key)
+                    similarities.append((other_name, sim_score))
+            
+            top_5 = sorted(similarities, key=lambda x: x[1], reverse=True)[:5]
+
+            return jsonify({
+                "score": 100,
+                "message": "🔥 You got it!",
+                "matched_name": guess_key,
+                "top_5": top_5,
+                "mode": game_mode
+            })
+
+        score, breakdown = compute_similarity(guess_player, target_player, guess_key, target_key)
 
         return jsonify({
-            "score": 100,
-            "message": "🔥 You got it!",
+            "score": score,
             "matched_name": guess_key,
-            "top_5": top_5
+            "breakdown": breakdown,
+            "mode": game_mode
         })
 
-    score, breakdown = compute_similarity(guess_player, target_player, guess_key, target_key)
+    except Exception as e:
+        print(f"Error in guess endpoint: {e}")
+        return jsonify({"error": "Internal server error occurred."}), 500
 
+@app.route('/api/random_player', methods=['POST'])
+def get_random_player():
+    """Get a random player for the specified game mode"""
+    try:
+        data = request.json or {}
+        game_mode = data.get('mode', 'all-time')
+        
+        allowed_players = get_filtered_players(game_mode)
+        if not allowed_players:
+            return jsonify({"error": "No players available for this game mode"}), 400
+        
+        random_player = random.choice(allowed_players)
+        
+        return jsonify({
+            "player": random_player,
+            "mode": game_mode,
+            "total_players": len(allowed_players)
+        })
+    
+    except Exception as e:
+        print(f"Error in random_player endpoint: {e}")
+        return jsonify({"error": "Internal server error occurred."}), 500
+
+# Debug endpoint to check player filtering
+@app.route('/api/debug/players', methods=['GET'])
+def debug_players():
+    """Debug endpoint to see player filtering results"""
+    all_time_players = get_filtered_players('all-time')
+    classic_players = get_filtered_players('classic')
+    
+    # Sample of classic players with their stats
+    classic_sample = []
+    for player_name in classic_players[:10]:  # First 10 players
+        player_entry = next((p for p in players_list if p['name'] == player_name), None)
+        if player_entry:
+            classic_sample.append({
+                'name': player_name,
+                'start_year': player_entry['start_year'],
+                'career_length': player_entry['career_length']
+            })
+    
     return jsonify({
-        "score": score,
-        "matched_name": guess_key,
-        "breakdown": breakdown
+        'all_time_count': len(all_time_players),
+        'classic_count': len(classic_players),
+        'classic_sample': classic_sample,
+        'total_players_loaded': len(players_list)
     })
 
 if __name__ == '__main__':
     print("Starting NBA Similarity Game Backend...")
+    print(f"Loaded {len(players_db)} total players")
+    
+    all_time_count = len(get_filtered_players('all-time'))
+    classic_count = len(get_filtered_players('classic'))
+    
+    print(f"All-time mode players: {all_time_count}")
+    print(f"Classic mode players: {classic_count}")
+    
+    if classic_count == 0:
+        print("WARNING: No players found for classic mode! Check your data format.")
+        # Show sample of player data for debugging
+        sample_players = players_list[:3]
+        for player in sample_players:
+            print(f"Sample player: {player['name']}, start_year: {player['start_year']}, career_length: {player['career_length']}")
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
