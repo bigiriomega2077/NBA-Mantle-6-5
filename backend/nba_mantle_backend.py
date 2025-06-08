@@ -161,6 +161,12 @@ def get_players():
     """Return list of all player names"""
     return jsonify(list(players_db.keys()))
 
+# Fix the endpoint name that the frontend is expecting
+@app.route('/api/player_awards', methods=['GET'])
+def get_player_awards():
+    """Return list of all player names (for compatibility with frontend)"""
+    return jsonify(list(players_db.keys()))
+
 @app.route('/api/guess', methods=['POST'])
 def guess():
     data = request.json
