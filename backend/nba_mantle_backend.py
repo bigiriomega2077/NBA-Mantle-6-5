@@ -23,6 +23,7 @@ def compute_similarity(player1, player2, name1=None, name2=None):
     score = 0
     breakdown = {}
 
+    # Shared seasons
     p1_seasons = set((s["team"], s["season"]) for s in player1.get("seasons", []))
     p2_seasons = set((s["team"], s["season"]) for s in player2.get("seasons", []))
     shared_seasons = sorted(p1_seasons & p2_seasons, key=lambda x: x[1])
@@ -30,16 +31,16 @@ def compute_similarity(player1, player2, name1=None, name2=None):
 
     consecutive_bonus = 0
     if shared_season_count >= 2:
-        seasons_only = [season for _, season in shared_seasons]
+        years = [s for _, s in shared_seasons]
         streak = 1
         max_streak = 1
-        for i in range(1, len(seasons_only)):
-            if seasons_only[i] == seasons_only[i-1] + 1:
+        for i in range(1, len(years)):
+            if years[i] == years[i-1] + 1:
                 streak += 1
                 max_streak = max(max_streak, streak)
             else:
                 streak = 1
-        consecutive_bonus = max_streak * 2
+        consecutive_bonus = min(max_streak * 2, 10)
 
     if shared_season_count >= 6:
         pts = 50
@@ -51,106 +52,86 @@ def compute_similarity(player1, player2, name1=None, name2=None):
         pts = 20
     else:
         pts = 0
+
     score += pts + consecutive_bonus
     breakdown["shared_seasons"] = pts
     breakdown["shared_streak_bonus"] = consecutive_bonus
-    breakdown["shared_seasons_detail"] = shared_seasons
 
+    # Teammate years
     teammate_years = player1.get("teammate_years", {}).get(name2, 0)
     if teammate_years >= 6:
         pts = 15
     elif teammate_years >= 4:
         pts = 10
-    elif teammate_years >= 3:
-        pts = 7
-    elif teammate_years == 2:
-        pts = 4
+    elif teammate_years >= 2:
+        pts = 6
     elif teammate_years == 1:
-        pts = 1
+        pts = 3
     else:
         pts = 0
     score += pts
     breakdown["teammate_years"] = pts
 
+    # Shared franchises
     overlap_teams = set(player1.get("teams", [])) & set(player2.get("teams", []))
-    overlap = len(overlap_teams)
-    pts = min(overlap * 3, 9)
-    score += pts
-    breakdown["franchise_overlap"] = pts
+    team_pts = len(overlap_teams) * 2
+    score += team_pts
+    breakdown["shared_teams"] = team_pts
 
+    # Tenure overlap
     tenure_bonus = 0
     for team in overlap_teams:
-        p1_years = {s["season"] for s in player1.get("seasons", []) if s["team"] == team}
-        p2_years = {s["season"] for s in player2.get("seasons", []) if s["team"] == team}
-        common_years = p1_years & p2_years
-        if len(common_years) >= 3:
-            tenure_bonus += 3
-        elif len(common_years) == 2:
-            tenure_bonus += 2
-        elif len(common_years) == 1:
-            tenure_bonus += 1
+        p1_years = {s["season"] for s in player1["seasons"] if s["team"] == team}
+        p2_years = {s["season"] for s in player2["seasons"] if s["team"] == team}
+        overlap = len(p1_years & p2_years)
+        tenure_bonus += min(overlap, 3)
     score += tenure_bonus
-    breakdown["franchise_tenure_bonus"] = tenure_bonus
+    breakdown["team_tenure"] = tenure_bonus
 
-    if player1.get("archetype") == player2.get("archetype"):
+    # Position match
+    p1_pos = player1.get("position", "")
+    p2_pos = player2.get("position", "")
+    if p1_pos == p2_pos:
         pts = 8
-    else:
-        pairs = {("Guard", "Wing"), ("Wing", "Big"), ("Guard", "Big")}
-        a1 = player1.get("archetype", "")
-        a2 = player2.get("archetype", "")
-        pts = 2 if (a1, a2) in pairs or (a2, a1) in pairs else 0
-    score += pts
-    breakdown["archetype"] = pts
-
-    if player1.get("position") == player2.get("position"):
-        pts = 6
-    elif player1.get("position", "")[:2] == player2.get("position", "")[:2]:
+    elif p1_pos[:2] == p2_pos[:2]:
         pts = 2
     else:
         pts = 0
     score += pts
-    breakdown["position"] = pts
+    breakdown["position_match"] = pts
 
-    draft_diff = abs(player1.get("draft_year", 0) - player2.get("draft_year", 0))
-    if draft_diff <= 1:
-        pts = 3
-    elif draft_diff <= 3:
-        pts = 2
-    else:
-        pts = 0
-    score += pts
-    breakdown["draft_diff"] = pts
-
+    # Start year (era proximity)
     era_diff = abs(player1.get("start_year", 0) - player2.get("start_year", 0))
-    if era_diff <= 5:
-        pts = 5
-    elif era_diff <= 10:
-        pts = 2
-    else:
-        pts = 0
-    score += pts
-    breakdown["era_diff"] = pts
+    era_pts = 4 if era_diff <= 5 else 2 if era_diff <= 10 else 0
+    score += era_pts
+    breakdown["start_year_diff"] = era_pts
 
-    p1_end = player1.get("start_year", 0) + player1.get("career_length", 0)
-    p2_end = player2.get("start_year", 0) + player2.get("career_length", 0)
-    end_diff = abs(p1_end - p2_end)
-    end_bonus = 2 if end_diff <= 3 else 0
-    score += end_bonus
-    breakdown["career_end_proximity"] = end_bonus
+    # All-Star (once)
+    if set(player1.get("all_star_seasons", [])) & set(player2.get("all_star_seasons", [])):
+        score += 2
+        breakdown["shared_all_star"] = 2
 
-    cl_diff = abs(player1.get("career_length", 0) - player2.get("career_length", 0))
-    if cl_diff <= 3:
-        pts = 2
-    elif cl_diff <= 5:
-        pts = 1
-    else:
-        pts = 0
-    score += pts
-    breakdown["career_length"] = pts
+    # All-NBA/Defense/Rookie team (once)
+    found_team = False
+    for sel1 in player1.get("all_team_selections", []):
+        for sel2 in player2.get("all_team_selections", []):
+            if sel1["season"] == sel2["season"] and sel1["type"] == sel2["type"]:
+                found_team = True
+                break
+        if found_team:
+            break
+    if found_team:
+        score += 2
+        breakdown["shared_all_team"] = 2
+
+    # Shared award winners (once)
+    if set(player1.get("awards_won", [])) & set(player2.get("awards_won", [])):
+        score += 1
+        breakdown["shared_awards"] = 1
 
     breakdown["total"] = min(score, 99)
     return breakdown["total"], breakdown
-
+    
 def get_player(name):
     name = name.strip().lower()
     for player in players_db:
