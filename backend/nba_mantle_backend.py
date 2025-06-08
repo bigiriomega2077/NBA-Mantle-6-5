@@ -100,16 +100,27 @@ def compute_similarity(player1, player2, name1=None, name2=None):
     score += pts
     breakdown["position_match"] = pts
 
-    # Start year (era proximity)
-    era_diff = abs(player1.get("start_year", 0) - player2.get("start_year", 0))
-    era_pts = 4 if era_diff <= 5 else 2 if era_diff <= 10 else 0
+    # Start year (era proximity with exact match bonus)
+    start1 = player1.get("start_year", 0)
+    start2 = player2.get("start_year", 0)
+    era_diff = abs(start1 - start2)
+
+    if era_diff == 0:
+        era_pts = 6  # Big bonus for same start year
+    elif era_diff <= 5:
+        era_pts = 4
+    elif era_diff <= 10:
+        era_pts = 2
+    else:
+        era_pts = 0
+
     score += era_pts
     breakdown["start_year_diff"] = era_pts
 
     # All-Star (once)
     if set(player1.get("all_star_seasons", [])) & set(player2.get("all_star_seasons", [])):
-        score += 2
-        breakdown["shared_all_star"] = 2
+        score += 3
+        breakdown["shared_all_star"] = 3
 
     # All-NBA/Defense/Rookie team (once)
     found_team = False
@@ -121,13 +132,13 @@ def compute_similarity(player1, player2, name1=None, name2=None):
         if found_team:
             break
     if found_team:
-        score += 2
-        breakdown["shared_all_team"] = 2
+        score += 3
+        breakdown["shared_all_team"] = 3
 
     # Shared award winners (once)
     if set(player1.get("awards_won", [])) & set(player2.get("awards_won", [])):
-        score += 1
-        breakdown["shared_awards"] = 1
+        score += 5
+        breakdown["shared_awards"] = 5
 
     breakdown["total"] = min(score, 99)
     return breakdown["total"], breakdown
