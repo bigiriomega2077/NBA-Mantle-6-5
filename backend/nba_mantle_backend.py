@@ -243,6 +243,11 @@ def get_player_awards():
     """Return list of all player names (for compatibility with frontend)"""
     return jsonify(list(players_db.keys()))
 
+@app.route('/api/players_data', methods=['GET'])
+def get_players_data():
+    """Return full player database for filtering"""
+    return jsonify(players_db)
+
 @app.route('/api/guess', methods=['POST'])
 def guess():
     try:
