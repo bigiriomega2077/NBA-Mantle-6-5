@@ -154,7 +154,12 @@ def get_player(name):
     return None, None
 
 def calculate_career_length(player_data):
-    """Calculate career length from seasons data"""
+    """Calculate career length from existing data or seasons data as fallback"""
+    # First, try to use the existing career_length from JSON
+    if "career_length" in player_data and player_data["career_length"] > 0:
+        return player_data["career_length"]
+    
+    # Fallback: calculate from seasons data
     seasons = player_data.get("seasons", [])
     if not seasons:
         return 0
@@ -301,5 +306,4 @@ if __name__ == '__main__':
     print(f"Loaded {len(players_db)} players from database")
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-    #
+    
